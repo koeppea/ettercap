@@ -173,6 +173,10 @@ static int sslw_remove_sts(struct packet_object *po);
 static int sslw_clienthello_cb(SSL *ssl_sk, int *alert, void *arg);
 static char* sslw_get_clienthello_sni(SSL *ssl);
 #endif
+#ifdef HAVE_OPENSSL_1_0_2
+static void sslw_alpn_cb(SSL *ssl, const unsigned char **out, unsigned char *outlen,
+      const unsigned char *in, unsigned int inlen, void *arg);
+#endif
 
 /*******************************************/
 
@@ -613,6 +617,16 @@ static char* sslw_get_clienthello_sni(SSL *ssl)
 }
 #endif
 
+#ifdef HAVE_OPENSSL_1_0_2
+static void sslw_alpn_cb(SSL *ssl, const unsigned char **out, unsigned char *outlen,
+      const unsigned char *in, unsigned int inlen, void *arg)
+{
+   DEBUG_MSG("sslw_alpn_cb()");
+
+}
+#endif
+
+
 
 /* 
  * Perform a blocking SSL_accept with a
@@ -668,6 +682,11 @@ static int sslw_sync_ssl(struct accepted_entry *ae)
 #ifdef HAVE_OPENSSL_1_1_1
    /* Set a Callback for the SSL client context to pause the Client Handshake */
    SSL_CTX_set_client_hello_cb(ssl_ctx_client, sslw_clienthello_cb, (void*)ae);
+#endif
+
+#ifdef HAVE_OPENSSL_1_0_2
+   /* Set a Callback for the ALPN to get notice if HTTP/2 is being used */
+   SSL_CTX_set_alpn_select_cb(ssl_ctx_client, sslw_alpn_cb, (void*)ae);
 #endif
 
    ae->ssl[SSL_SERVER] = SSL_new(ssl_ctx_server);
