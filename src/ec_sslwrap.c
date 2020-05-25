@@ -119,6 +119,8 @@ struct accepted_entry {
    unsigned int tls_handshake_state;
 #define SSL_CLIENTHELLO_INTERCEPTED 1
    char *hostname;
+   uchar http2_support;
+#define HTTP2_PROTO "\002h2"
 #endif
    #define SSL_CLIENT 0
    #define SSL_SERVER 1
@@ -172,9 +174,7 @@ static int sslw_remove_sts(struct packet_object *po);
 #ifdef HAVE_OPENSSL_1_1_1
 static int sslw_clienthello_cb(SSL *ssl_sk, int *alert, void *arg);
 static char* sslw_get_clienthello_sni(SSL *ssl);
-#endif
-#ifdef HAVE_OPENSSL_1_0_2
-static void sslw_alpn_cb(SSL *ssl, const unsigned char **out, unsigned char *outlen,
+static void sslw_alpn_client_cb(SSL *ssl, const unsigned char **out, unsigned char *outlen,
       const unsigned char *in, unsigned int inlen, void *arg);
 #endif
 
@@ -615,14 +615,60 @@ static char* sslw_get_clienthello_sni(SSL *ssl)
 
    return NULL;
 }
-#endif
 
-#ifdef HAVE_OPENSSL_1_0_2
-static void sslw_alpn_cb(SSL *ssl, const unsigned char **out, unsigned char *outlen,
+/*
+ * Callback to check wether client signals HTTP2 support
+ *  - if client has "h2" in the protocol list, we respond with "h2" only
+ *  - if client has no "h2" in the protocol list, we don't include the ALPN in the
+ *    ServerHello response
+ */
+static int sslw_alpn_client_cb(SSL *ssl, const unsigned char **out, unsigned char *outlen,
       const unsigned char *in, unsigned int inlen, void *arg)
 {
-   DEBUG_MSG("sslw_alpn_cb()");
+   struct accepted_entry *ae;
 
+   ae = (struct accepted_entry *)arg;
+
+   DEBUG_MSG("sslw_alpn_client_cb(): ALPN extension existing");
+
+   if (memmem(in, inlen, HTTP2_PROTO, 3)) {
+      DEBUG_MSG("sslw_alpn_client_cb(): HTTP2 support detected");
+      /* set HTTP2 protocol for the server response */
+      *out = HTTP2_PROTO;
+      *outlen = 3;
+
+      ae->http2_support = 1;
+
+      return SSL_TLSEXT_ERR_OK;
+   }
+
+   return SSL_TLSEXT_ERR_NOACK;
+}
+
+static int sslw_alpn_server_cb(SSL *ssl, const unsigned char **out, unsigned char *outlen,
+      const unsigned char *in, unsigned int inlen, void *arg)
+{
+   struct accepted_entry *ae;
+
+   ae = (struct accepted_entry *)arg;
+
+   DEBUG_MSG("sslw_alpn_server_cb(): ALPN extension existing");
+
+
+   if (memmem(in, inlen, HTTP2_PROTO, 3)) {
+      DEBUG_MSG("sslw_alpn_server_cb(): HTTP2 support detected");
+      /* set HTTP2 protocol */
+      *out = HTTP2_PROTO;
+      *outlen = 3;
+
+      ae->http2_support++;
+   }
+   else {
+      DEBUG_MSG("sslw_alpn_server_cb(): turn down HTTP/2 negotiation towards client");
+      SSL_set_alpn_protos(ae->ssl[SSL_CLIENT], "", 0);
+   }
+
+   return SSL_TLSEXT_ERR_OK;
 }
 #endif
 
@@ -679,21 +725,29 @@ static int sslw_sync_ssl(struct accepted_entry *ae)
 
    X509 *server_cert;
    
+   /* Initialize client side SSL */
 #ifdef HAVE_OPENSSL_1_1_1
    /* Set a Callback for the SSL client context to pause the Client Handshake */
    SSL_CTX_set_client_hello_cb(ssl_ctx_client, sslw_clienthello_cb, (void*)ae);
-#endif
 
-#ifdef HAVE_OPENSSL_1_0_2
    /* Set a Callback for the ALPN to get notice if HTTP/2 is being used */
-   SSL_CTX_set_alpn_select_cb(ssl_ctx_client, sslw_alpn_cb, (void*)ae);
+   SSL_CTX_set_alpn_select_cb(ssl_ctx_client, sslw_alpn_client_cb, (void*)ae);
 #endif
 
+   /* Create SSL from client side SSL context */
+   ae->ssl[SSL_CLIENT] = SSL_new(ssl_ctx_client);
+   SSL_set_fd(ae->ssl[SSL_CLIENT], ae->fd[SSL_CLIENT]);
+
+   /* Initialize server side SSL */
+#ifdef HAVE_OPENSSL_1_1_1
+   /* Set a callback when a protocol has to be selected */
+   SSL_CTX_set_next_proto_select_cb(ssl_ctx_server, sslw_alpn_server_cb, (void*)ae);
+#endif
+
+   /* Create SSL SSL from server side SSL context */
    ae->ssl[SSL_SERVER] = SSL_new(ssl_ctx_server);
    SSL_set_connect_state(ae->ssl[SSL_SERVER]);
    SSL_set_fd(ae->ssl[SSL_SERVER], ae->fd[SSL_SERVER]);
-   ae->ssl[SSL_CLIENT] = SSL_new(ssl_ctx_client);
-   SSL_set_fd(ae->ssl[SSL_CLIENT], ae->fd[SSL_CLIENT]);
 
 #ifdef HAVE_OPENSSL_1_1_1
    /* Begin SSL handshake to extract SNI - then suspend by callback */
@@ -703,6 +757,10 @@ static int sslw_sync_ssl(struct accepted_entry *ae)
    if (ae->hostname)
       /* set SNI for server-side connection */
       SSL_set_tlsext_host_name(ae->ssl[SSL_SERVER], ae->hostname);
+
+   if (ae->http2_support)
+      /* set ALPN to HTTP/2 towards server when client advertised */
+      SSL_set_alpn_protos(ae->ssl[SSL_SERVER], HTTP2_PROTO, 3);
 #endif
     
    /* Connect to actual SSL server */
