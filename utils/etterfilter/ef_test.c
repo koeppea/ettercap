@@ -239,6 +239,11 @@ void print_function(struct filter_op *fop, u_int32 eip)
                fop->op.func.string);
          break;
          
+      case FFUNC_RANDOM:
+         USER_MSG("%04lu: RANDOM level %d start offset %d length %d\n", (unsigned long)eip,
+               fop->op.func.level, fop->op.func.slen, fop->op.func.rlen);
+         break;
+
       case FFUNC_LOG:
          USER_MSG("%04lu: LOG to \"%s\"\n", (unsigned long)eip, fop->op.func.string);
          break;

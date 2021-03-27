@@ -313,6 +313,17 @@ int encode_function(char *string, struct filter_op *fop)
          ret = E_SUCCESS;
       } else
          SCRIPT_ERROR("Wrong number of arguments for function \"%s\" ", name);
+   } else if (!strcmp(name, "random")) {
+      if (nargs == 3) {
+         if (encode_offset(dec_args[0], fop) == E_SUCCESS) {
+            fop->op.func.op = FFUNC_RANDOM;
+            fop->op.func.slen = atoi(dec_args[1]);
+            fop->op.func.rlen = atoi(dec_args[2]);
+            ret = E_SUCCESS;
+         } else
+            SCRIPT_ERROR("Unknown offset %s ", dec_args[0]);
+      } else
+         SCRIPT_ERROR("Wrong number of arguments for function \"%s\" ", name);
    } else if (!strcmp(name, "log")) {
       if (nargs == 2) {
          /* get the level (DATA or DECODED) */
