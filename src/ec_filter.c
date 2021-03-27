@@ -60,6 +60,7 @@ static int func_replace(struct filter_op *fop, struct packet_object *po);
 static int func_inject(struct filter_op *fop, struct packet_object *po);
 static int func_execinject(struct filter_op *fop, struct packet_object *po);
 static int func_execreplace(struct filter_op *fop, struct packet_object *po);
+static int func_random(struct filter_op *fop, struct packet_object *po);
 static int func_log(struct filter_op *fop, struct packet_object *po);
 static int func_drop(struct packet_object *po);
 static int func_kill(struct packet_object *po);
@@ -236,6 +237,12 @@ static int execute_func(struct filter_op *fop, struct packet_object *po)
             return FLAG_TRUE;
          break;
          
+      case FFUNC_RANDOM:
+         /* replace the string through output of a executable */
+         if (func_random(fop, po) == E_SUCCESS)
+            return FLAG_TRUE;
+         break;
+
       case FFUNC_LOG:
          /* log the packet */
          if (func_log(fop, po) == E_SUCCESS)
@@ -988,6 +995,112 @@ static int func_execreplace(struct filter_op *fop, struct packet_object *po)
    return E_SUCCESS;
 }
 
+
+/*
+ * replace data with a random value
+ */
+static int func_random(struct filter_op *fop, struct packet_object *po)
+{
+#if 0
+   int child_stdout[2], child_stdin[2];
+   pid_t child_pid;
+   unsigned char *output = NULL;
+   size_t n = 0, offset = 0, size = 128;
+   unsigned char buf[size];
+
+   /* check the offensiveness */
+   if (EC_GBL_OPTIONS->unoffensive)
+      JIT_FAULT("Cannot replace packets in unoffensive mode");
+
+#endif
+
+   DEBUG_MSG("filter engine: func_random %s", fop->op.func.string);
+
+   printf("level properties: level %d, offset %d, size %d\n",
+         fop->op.test.level, fop->op.test.offset, fop->op.test.size);
+   printf("random properties: start offset %d, length %d\n",
+         fop->op.func.slen, fop->op.func.rlen);
+
+   return E_SUCCESS;
+
+#if 0
+   /* open the pipe */
+   if (pipe(child_stdin) != 0 || pipe(child_stdout) != 0) {
+      USER_MSG("filter engine: execreplace(): failed to create pipes\n");
+      return -E_FATAL;
+   }
+   if ((child_pid = fork()) < 0) {
+      USER_MSG("filter engine: execreplace(): failed to fork\n");
+      return -E_FATAL;
+   }
+   if (child_pid == 0) {
+       char *const argv[] = { "/bin/sh", "-c", fop->op.func.string, NULL };
+       if (dup2(child_stdin[0], STDIN_FILENO) == -1 || dup2(child_stdout[1], STDOUT_FILENO) == -1) {
+           exit(EXIT_FAILURE);
+       }
+       close(child_stdin[1]);
+       close(child_stdout[0]);
+
+       execv(argv[0], argv);
+       exit(EXIT_FAILURE);
+   }
+
+   close(child_stdin[0]);
+   close(child_stdout[1]);
+   /* fill child STDIN with DATA */
+   while (offset < po->DATA.len) {
+       n = write(child_stdin[1], po->DATA.data + offset, po->DATA.len - offset);
+       if (n == (size_t)-1) {
+           break;
+       }
+       offset += n;
+   }
+   close(child_stdin[1]);
+
+   /* Fill child STDIN with DATA */
+   offset = 0;
+   while ((n = read(child_stdout[0], buf, size)) != 0) {
+      if (output == NULL) {
+         SAFE_CALLOC(output, offset+n, sizeof(unsigned char));
+      }
+      else {
+         SAFE_REALLOC(output, sizeof(unsigned char)*(offset+n));
+      }
+
+      memcpy(output+offset, buf, n);
+      offset += n;
+   }
+   /* close pipe stream */
+   close(child_stdout[0]);
+
+   /* check if we are overflowing pcap buffer */
+   if(EC_GBL_PCAP->snaplen - (po->L4.header - (po->packet + po->L2.len) + po->L4.len) <= po->DATA.len + (unsigned)offset)
+      JIT_FAULT("replaced output too long");
+
+   /* copy the output into the buffer */
+   memcpy(po->DATA.data, output, offset);
+
+   /* Adjust packet len and delta */
+   if ((u_int)offset > po->DATA.len) {
+      po->DATA.delta += (int)((u_int)offset - po->DATA.len);
+   } else {
+      po->DATA.delta -= (int)(po->DATA.len - (u_int)offset);
+   }
+   po->DATA.len = offset;
+
+   /* mark the packet as modified */
+   po->flags |= PO_MODIFIED;
+
+   /* unset the flag to be dropped */
+   if (po->flags & PO_DROPPED)
+      po->flags ^= PO_DROPPED;
+
+   /* free memory */
+   SAFE_FREE(output);
+
+   return E_SUCCESS;
+#endif
+}
 
 /*
  * log the packet to a file
