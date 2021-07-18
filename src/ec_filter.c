@@ -1001,92 +1001,92 @@ static int func_execreplace(struct filter_op *fop, struct packet_object *po)
  */
 static int func_random(struct filter_op *fop, struct packet_object *po)
 {
-#if 0
-   int child_stdout[2], child_stdin[2];
-   pid_t child_pid;
-   unsigned char *output = NULL;
-   size_t n = 0, offset = 0, size = 128;
-   unsigned char buf[size];
+   unsigned char *base, *ptr, *end;
+   size_t len, cnt;
+   struct timeval seed;
+   long int rnd;
+
+   DEBUG_MSG("filter engine: func_random(lvl:%d(o:%d;l:%d), offset:%d, len:%d)",
+         fop->op.test.level, fop->op.test.offset, fop->op.test.size,
+         fop->op.func.offset, fop->op.func.olen);
 
    /* check the offensiveness */
    if (EC_GBL_OPTIONS->unoffensive)
       JIT_FAULT("Cannot replace packets in unoffensive mode");
 
-#endif
-
-   DEBUG_MSG("filter engine: func_random %s", fop->op.func.string);
-
-   printf("level properties: level %d, offset %d, size %d\n",
-         fop->op.test.level, fop->op.test.offset, fop->op.test.size);
-   printf("random properties: start offset %d, length %d\n",
-         fop->op.func.slen, fop->op.func.rlen);
-
-   return E_SUCCESS;
-
-#if 0
-   /* open the pipe */
-   if (pipe(child_stdin) != 0 || pipe(child_stdout) != 0) {
-      USER_MSG("filter engine: execreplace(): failed to create pipes\n");
-      return -E_FATAL;
+   /* define base memory and length */
+   switch (fop->op.test.level) {
+      case 2:
+         /* check if packet contains enough data */
+         if (po->L2.len < fop->op.test.offset + fop->op.test.size) {
+            USER_MSG("filter engine: random(): packet length %d is smaller "
+                  "than the offset to be randomized");
+            return -E_FATAL;
+         }
+         /* set base and length */
+         base = po->L2.header + fop->op.test.offset;
+         len = fop->op.test.size;
+         break;
+      case 3:
+         /* check if packet contains enough data */
+         if (po->L3.len < fop->op.test.offset + fop->op.test.size) {
+            USER_MSG("filter engine: random(): packet length %d is smaller "
+                  "than the offset to be randomized");
+            return -E_FATAL;
+         }
+         /* set base and length */
+         base = po->L3.header + fop->op.test.offset;
+         len = fop->op.test.size;
+         break;
+      case 4:
+         /* check if packet contains enough data */
+         if (po->L4.len < fop->op.test.offset + fop->op.test.size) {
+            USER_MSG("filter engine: random(): packet length %d is smaller "
+                  "than the offset to be randomized");
+            return -E_FATAL;
+         }
+         /* set base and length */
+         base = po->L4.header + fop->op.test.offset;
+         len = fop->op.test.size;
+         break;
+      case 5:
+         base = po->DATA.data;
+         len = po->DATA.len;
+         break;
+      case 6:
+         base = po->DATA.disp_data;
+         len = po->DATA.disp_len;
+         break;
+      default:
+         DEBUG_MSG("filter engine: random(): unsupported level for randomizing");
+         break;
    }
-   if ((child_pid = fork()) < 0) {
-      USER_MSG("filter engine: execreplace(): failed to fork\n");
-      return -E_FATAL;
-   }
-   if (child_pid == 0) {
-       char *const argv[] = { "/bin/sh", "-c", fop->op.func.string, NULL };
-       if (dup2(child_stdin[0], STDIN_FILENO) == -1 || dup2(child_stdout[1], STDOUT_FILENO) == -1) {
-           exit(EXIT_FAILURE);
-       }
-       close(child_stdin[1]);
-       close(child_stdout[0]);
 
-       execv(argv[0], argv);
-       exit(EXIT_FAILURE);
+   /* check if enough bytes are available for ranomization offset */
+   if (fop->op.func.offset + fop->op.func.olen > len) {
+      USER_MSG("filter engine: random(): too few bytes (%d) available to be "
+            "randomized at offset %d(%d) - skipping randomization\n", len,
+            fop->op.func.offset, fop->op.func.olen);
+      return E_SUCCESS;
    }
 
-   close(child_stdin[0]);
-   close(child_stdout[1]);
-   /* fill child STDIN with DATA */
-   while (offset < po->DATA.len) {
-       n = write(child_stdin[1], po->DATA.data + offset, po->DATA.len - offset);
-       if (n == (size_t)-1) {
-           break;
-       }
-       offset += n;
+   /* build random seed */
+   gettimeofday(&seed, NULL);
+   srandom(seed.tv_sec ^ seed.tv_usec);
+
+   /* build random data */
+   ptr = base + fop->op.func.offset;
+   end = ptr + fop->op.func.olen;
+   while (ptr < end) {
+      /* define how much bytes from random number to be used */
+      cnt = end - ptr;
+      if (cnt > sizeof(rnd))
+         cnt = sizeof(rnd);
+      /* generate random number, replace target and accelerate pointer */
+      rnd = random();
+      memcpy(ptr, &rnd, cnt);
+      ptr += cnt;
    }
-   close(child_stdin[1]);
-
-   /* Fill child STDIN with DATA */
-   offset = 0;
-   while ((n = read(child_stdout[0], buf, size)) != 0) {
-      if (output == NULL) {
-         SAFE_CALLOC(output, offset+n, sizeof(unsigned char));
-      }
-      else {
-         SAFE_REALLOC(output, sizeof(unsigned char)*(offset+n));
-      }
-
-      memcpy(output+offset, buf, n);
-      offset += n;
-   }
-   /* close pipe stream */
-   close(child_stdout[0]);
-
-   /* check if we are overflowing pcap buffer */
-   if(EC_GBL_PCAP->snaplen - (po->L4.header - (po->packet + po->L2.len) + po->L4.len) <= po->DATA.len + (unsigned)offset)
-      JIT_FAULT("replaced output too long");
-
-   /* copy the output into the buffer */
-   memcpy(po->DATA.data, output, offset);
-
-   /* Adjust packet len and delta */
-   if ((u_int)offset > po->DATA.len) {
-      po->DATA.delta += (int)((u_int)offset - po->DATA.len);
-   } else {
-      po->DATA.delta -= (int)(po->DATA.len - (u_int)offset);
-   }
-   po->DATA.len = offset;
 
    /* mark the packet as modified */
    po->flags |= PO_MODIFIED;
@@ -1095,11 +1095,8 @@ static int func_random(struct filter_op *fop, struct packet_object *po)
    if (po->flags & PO_DROPPED)
       po->flags ^= PO_DROPPED;
 
-   /* free memory */
-   SAFE_FREE(output);
-
    return E_SUCCESS;
-#endif
+
 }
 
 /*
