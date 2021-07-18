@@ -60,6 +60,8 @@ struct filter_op {
          u_int8 *replace;
          size_t rlen;
          struct regex_opt *ropt;
+         u_int16 offset;
+         size_t olen;
       } func;
       
       /* tests */

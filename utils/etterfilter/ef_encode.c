@@ -318,8 +318,8 @@ int encode_function(char *string, struct filter_op *fop)
          if (encode_offset(dec_args[0], fop) == E_SUCCESS) {
             fop->opcode = FOP_FUNC;
             fop->op.func.op = FFUNC_RANDOM;
-            fop->op.func.slen = atoi(dec_args[1]);
-            fop->op.func.rlen = atoi(dec_args[2]);
+            fop->op.func.offset = atoi(dec_args[1]);
+            fop->op.func.olen = atoi(dec_args[2]);
             ret = E_SUCCESS;
          } else
             SCRIPT_ERROR("Unknown offset %s ", dec_args[0]);
