@@ -1062,12 +1062,20 @@ static int func_random(struct filter_op *fop, struct packet_object *po)
          break;
    }
 
+   /* check if offset advances the available buffer */
+   if (fop->op.func.offset > len) {
+      USER_MSG("filter engine: random(): offset %d advances the available
+            buffer of %d bytes - skipping randomization\n",
+            fop->op.func.offset, len);
+      return E_SUCCESS;
+   }
+
    /* check if enough bytes are available for ranomization offset */
    if (fop->op.func.offset + fop->op.func.olen > len) {
-      USER_MSG("filter engine: random(): too few bytes (%d) available to be "
-            "randomized at offset %d(%d) - skipping randomization\n", len,
+      DEBUG_MSG("filter engine: random(): too few bytes (%d) available to be "
+            "randomized at offset %d(%d) - truncating\n", len,
             fop->op.func.offset, fop->op.func.olen);
-      return E_SUCCESS;
+      fop->op.func.olen = len - fop->op.func.offset;
    }
 
    /* build random seed */
