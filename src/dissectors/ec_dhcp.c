@@ -179,6 +179,8 @@ FUNC_DECODER(dissector_dhcp)
             hook_point(HOOK_PROTO_DHCP_REQUEST, PACKET);
       
             break;
+
+
       }
 
    /* server replies */ 
@@ -206,11 +208,12 @@ FUNC_DECODER(dissector_dhcp)
          case DHCP_ACK:
          case DHCP_OFFER:
 
-            if (resp == DHCP_ACK)
+            if (resp == DHCP_ACK) {
                DEBUG_MSG("\tDissector_DHCP ACK");
-            else
-            {
+               hook_point(HOOK_PROTO_DHCP_ACK, PACKET);
+            } else {
                DEBUG_MSG("\tDissector_DHCP OFFER");
+               hook_point(HOOK_PROTO_DHCP_OFFER, PACKET);
             }
    
             /* get the assigned ip */
