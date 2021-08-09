@@ -24,6 +24,7 @@ autoadd
 chk_poison
 dns_spoof
 mdns_spoof
+dhcp_opt_poison
 dos_attack
 dummy
 find_conn
