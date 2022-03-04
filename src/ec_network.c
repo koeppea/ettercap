@@ -158,7 +158,7 @@ static int source_init(char *name, struct iface_env *source, bool primary, bool 
    pcap_t *pcap = NULL;
    libnet_t *lnet = NULL;
    struct bpf_program bpf;
-   char pcap_errbuf[PCAP_ERRBUF_SIZE];
+   char pcap_errbuf[PCAP_ERRBUF_SIZE] = {0};
    char lnet_errbuf[LIBNET_ERRBUF_SIZE];
    int snaplen;
 
@@ -183,6 +183,18 @@ static int source_init(char *name, struct iface_env *source, bool primary, bool 
             ON_ERROR(pcap, NULL, "pcap_open_live: %s", pcap_errbuf);
          else
             return -E_INITFAIL;
+      } else {
+         if (strlen(pcap_errbuf))
+            DEBUG_MSG("source_init: pcap_open_live() returned warning: %s", pcap_errbuf);
+
+         ret = pcap_set_immediate_mode(pcap, 1);
+
+         if (ret) {
+            if (ret == PCAP_ERROR_ACTIVATED)
+               DEBUG_MSG("source_init: already in immediate PCAP mode");
+            else
+               DEBUG_MSG("source_init: failed to set immediate PCAP mode");
+         }
       }
    } else {
       /* secondary sources must not be offline */
