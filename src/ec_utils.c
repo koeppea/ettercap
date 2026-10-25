@@ -184,7 +184,7 @@ void regain_privs(void)
 #ifdef OS_WINDOWS
    return;
 #endif
-   if(seteuid(0) < 0)
+   if(setreuid(0, 0) < 0)
       ERROR_MSG("seteuid()");
 
    USER_MSG("Regained root privileges: %d %d", getuid(), geteuid());
@@ -230,11 +230,11 @@ void drop_privs(void)
    DEBUG_MSG("drop_privs: seteuid(%d) setegid(%d)", uid, gid);
 
    /* drop to a good uid/gid ;) */
-   if ( setegid(gid) < 0 )
-      ERROR_MSG("setegid()");
+   if ( setregid(gid, gid) < 0 )
+      ERROR_MSG("setregid()");
 
-   if ( seteuid(uid) < 0 )
-      ERROR_MSG("seteuid()");
+   if ( setreuid(uid, uid) < 0 )
+      ERROR_MSG("setreuid()");
 
    DEBUG_MSG("privs: UID: %d %d  GID: %d %d", (int)getuid(), (int)geteuid(), (int)getgid(), (int)getegid() );
    USER_MSG("Privileges dropped to EUID %d EGID %d...\n\n", (int)geteuid(), (int)getegid() );
